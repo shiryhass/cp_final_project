@@ -1,0 +1,919 @@
+﻿;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;; Comp171 - Compiler - Tests
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(load "compiler.scm")	    
+
+(define tests-counter 0)
+(define failed-tests-counter 0)
+
+;;;; Configuration
+(define show-passed-tests #t)
+(define show-summary #t)
+(define catch-exceptions #f)
+
+(define try-catch
+  (lambda (try-thunk catch-thunk)
+    (if catch-exceptions
+      (guard (c (else (catch-thunk)))
+      (try-thunk))
+      (try-thunk))
+))
+		
+(define tests-file->string
+  (lambda (in-file)
+    (let ((in-port (open-input-file in-file)))
+      (letrec ((run
+	(lambda ()
+	  (let ((ch (read-char in-port)))
+	    (if (eof-object? ch)
+	      (begin
+		(close-input-port in-port)
+		'())
+	      (cons ch (run)))))))
+	(list->string (run))))
+))
+
+(define tests-string->file
+  (lambda (str out-file)
+    (letrec ((out-port (open-output-file out-file))
+	  (run (lambda (lst)
+		  (if (null? lst) #t
+		      (begin (write-char (car lst) out-port)
+			     (run (cdr lst)))))))
+	(begin
+	  (run (string->list str))
+	  (close-output-port out-port)))
+	    
+))
+
+ (define prepare-func
+   (lambda (lst)
+     (map (lambda (x) (annotate-tc 
+ 		  (pe->lex-pe
+ 		    (box-set
+ 		      (remove-applic-lambda-nil
+ 			(eliminate-nested-defines
+ 			  (parse x))))))) lst)
+))
+
+(define test-input
+  (lambda (input)
+    (system "rm -f outResult")
+    (system "rm -f outFile")
+    (system "rm -f outFile.c")
+    (system "rm -f outFile.scm")
+    (tests-string->file input "outFile.scm")
+    (compile-scheme-file "outFile.scm" "outFile.c")
+    (system "gcc -o outFile outFile.c")
+    (system "./outFile > outResult")
+    (let ((result (tests-file->string "outResult")))
+      result)
+))
+
+(define test-func
+  (lambda (input)
+    (system "rm -f outResult")
+    (system "rm -f outFile")
+    (system "rm -f outFile.c")
+    (system "rm -f outFile.scm")
+    (tests-string->file input "outFile.scm")
+    (compile-scheme-file "outFile.scm" "outFile.c")
+    (system "gcc -o outFile outFile.c")
+    (system "./outFile > outResult")
+    (let ((result (tests-file->string "outResult")))
+      (system "rm -f outResult")
+      (system "rm -f outFile")
+      (system "rm -f outFile.c")
+      (system "rm -f outFile.scm")
+      result)
+))
+
+(define expected-result
+  (lambda (input)
+    (let* ((exp-res (eval input))
+	  (exp-res-str (tests-file->string (tests-string->file exp-res "expRes.scm"))))
+      exp-res-str)
+))
+		
+(define assert
+	(lambda (input expected-output)
+		(set! tests-counter (+ 1 tests-counter))
+		(try-catch (lambda ()
+		(let ((actual-output (test-func input)))			
+			(cond ((equal? actual-output expected-output)
+				(if show-passed-tests
+				  (begin (display (format "~s) ~a\n" tests-counter input))
+				  (display (format "\033[1;32m Success! ☺ \033[0m \n\n")))) 
+				  #t)
+				(else
+				  (set! failed-tests-counter (+ 1 failed-tests-counter))
+				  (display (format "~s) ~a\n" tests-counter input))
+				  (display (format "\033[1;31mFailed! ☹\033[0m\n\n\033[1;34mExpected:\n ~s\033[0m\n\n\033[1;29mActual:\n ~a\033[0m\n\n" expected-output actual-output))
+				#f))))
+			(lambda () (set! failed-tests-counter (+ 1 failed-tests-counter))
+				(display (format "~s) ~a\n" tests-counter input))
+				(display 
+				    (format "\n\033[1;31mEXCEPTION OCCURED. PLEASE CHECK MANUALLY THE INPUT:\n ~s\033[0m\n\n" input)) #f))
+			))
+			
+(define runTests
+  (lambda (tests-name lst)
+	(newline)
+	(display tests-name)
+	(display ":")
+	(newline)
+	(display "==============================================")
+	(newline)
+	(let ((results (map (lambda (x) (assert (car x) (cdr x))) lst)))
+	(newline)
+	(cond ((andmap (lambda (exp) (equal? exp #t)) results)	
+		(display (format "\033[1;32m~s Tests: SUCCESS! ☺ \033[0m\n \n" tests-name)) #t)		
+		(else
+		(display (format "\033[1;31m~s Tests: FAILED! ☹ \033[0m\n \n" tests-name)) #f)))
+))
+
+(define runAllTests
+  (lambda (lst)
+    (let ((results (map (lambda (test) (runTests (car test) (cdr test))) lst)))
+	(if show-summary
+	  (begin
+	    (display (format "Summary\n=============================\n\033[1;32mPassed: ~s of ~s tests ☺\033[0m\n" (- tests-counter failed-tests-counter) tests-counter))
+	    (if (> failed-tests-counter 0)
+	      (display (format "\033[1;31mFailed: ~s of ~s tests ☹\033[0m\n\n" failed-tests-counter tests-counter)))))
+      	(cond ((andmap (lambda (exp) (equal? exp #t)) results)		
+		(display "\033[1;32m!!!!!  ☺  ALL TESTS SUCCEEDED  ☺  !!!!\033[0m\n") #t)
+		(else (display "\033[1;31m#####  ☹  SOME TESTS FAILED  ☹  #####\033[0m\n") #f))
+		(newline))
+))
+
+(define real-tests
+  (list
+
+    (cons "23" "23\n") ;TestCase 1
+    (cons "(- 2)" "-2\n") ;TestCase 2
+    (cons "-1" "-1\n") ;TestCase 3
+    (cons "(/ 35 7)" "5\n") ;TestCase 4
+    (cons "(* 5 7)" "35\n") ;TestCase 5
+    (cons "(+ 53242653 35463560)" "88706213\n") ;TestCase 6
+    (cons "(+ (* 564 5) (- (+ 4 5)))" "2811\n") ;TestCase 7
+    (cons "(- ( - ( - ( - ( - ( - ( - ( - (- 5)))))))))" "-5\n") ;TestCase 8
+    (cons "((lambda (a) ( + a 7)) 5)" "12\n") ;TestCase 9
+    (cons "((lambda (a b) (a ( b (a 5 6) 8) 11)) + -)" "14\n") ;TestCase 10
+    (cons "((lambda (a b) (if (number? a) (make-string a) b)) #t 6)" "6\n") ;TestCase 11
+    (cons "((lambda (a b c) (if (= a c) (+ a c) (- b c 4))) 1 2 3)" "-5\n") ;TestCase 12
+    (cons "((lambda (a)
+        (begin
+          (define pi 3)
+          (define e 2)
+          (if (> a 64)
+              (+ pi e)
+              (* pi e)
+              )
+          )
+        ) 10)" "6\n") ;TestCase 13
+    (cons "(define sum (lambda (x) (if (= x 0) 0 (+ x (sum (- x 1)))))) (sum 60)" "1830\n") ;TestCase 14
+    (cons "(define rec (lambda (func1 func2 init param num)
+                (if (= 0 num)
+                    init
+                    (func1 (rec func1 func2 (func2 2 init param) param (- num 1))
+                      )
+                    )
+                )
+    ) (rec - + 5 7 20)" "185\n") ;TestCase 15
+
+    (cons "(((lambda (x)
+      (begin
+        (define func (lambda (y)
+                       (x y 5)
+                       )
+          )
+        func)
+      ) +) 65)" "70\n") ;TestCase 16
+
+    (cons "((lambda (x)
+      (begin
+        (define func1 (lambda (a)
+                        (+ a 4)
+                        )
+          )
+        (define func2 (lambda (a)
+                        (* a 4)
+                        )
+          )
+        (func1 (func2 (func1 x))))) 11)" "64\n") ;TestCase17
+
+    (cons "((lambda (f1 f2 f3 x)
+      (begin
+        (define pi 3)
+        (f1 (f2 (f3 pi x) x) x)
+        )
+      ) + - * 9)" "27\n") ;TestCase 18
+
+    (cons "(define odd? (lambda (x)
+                 (begin
+                   (define even?
+            (lambda (x)
+              (or (= x 0) (odd? (- x 1)))))
+                   (if (even? x) #f #t)
+                   )
+                 )
+    )
+(odd? 129)" "#t\n") ;TestCase 20
+
+    (cons "((lambda (f1 f2 input1 input2 input3 ifval)
+      (if (ifval input2 input3)
+      (f1 (f2 input1 5) 40)
+      (begin
+        (set! f2 f1)
+        (f1 (f2 input1 5) 40)
+        )
+      )) * + 5 7 -8 >)" "400\n") ;TestCase 21
+
+    (cons "((lambda (f1 f2 input1 input2 input3)
+    (begin
+      (define f (lambda () (f1 (f2 input1 input2) input3)))
+      (f)
+      )
+    ) - - 1 2 3)" "-4\n") ;TestCase 22
+    
+    (cons "((lambda (f1 f2 input1 input2 input3 ifval)
+          (begin
+            (define f (lambda () (f1 (f2 input1 5) 40)))
+           (if (ifval input2 input3)
+               (f)
+               (begin
+                 (set! f2 f1)
+                 (f)
+                 )
+               )
+           )
+        ) * * 1 2 3 =)" "200\n") ;TestCase 23
+
+    (cons "(((lambda (x y) (lambda () (+ x y))) 56 65))" "121\n") ;TestCase 24
+
+    (cons "(((lambda (x y) (lambda () (+ x y))) ((lambda (a) (* a a)) 500) 2))" "250002\n") ;TestCase 25
+
+    (cons "(((lambda (x y) (lambda () (x 89 y))) (lambda (a b) (* a b)) 2))" "178\n") ;TestCase 26
+
+    (cons "((lambda (x)
+      (begin
+        (define f1 (lambda (a) (+ a a)))
+        (define f2 (lambda (a) (* a a)))
+        (if (eq? (f1 x) (f2 x))
+            'eq!'
+            'no!
+            )
+        )
+      ) 2)" "eq!\n") ;TestCase 27
+
+    (cons "((lambda (f1 f2)
+      (if (eq? f1 f2)
+          'eq!
+          'no!
+          )
+      ) + -)" "no!\n") ;TestCase 28
+
+    (cons "(define factorial
+    (lambda(n)
+      (if (= n 0)
+        1
+        (* n (factorial (- n 1)))))) (factorial 6)" "720\n") ;TestCase 29
+
+    (cons "(define fibonacci
+        (lambda (n)
+          (if (< n 2)
+              1
+              (+ (fibonacci (- n 1)) (fibonacci (- n 2)))))) (fibonacci 11)" "144\n") ;TestCase 30
+
+    (cons "(define (equal? x y)
+    (if (not (pair? x))
+        (eq? x y)
+        (and (equal? (car x) (car y))
+             (equal? (cdr x) (cdr y))))) (equal? (cons 1 2) (cons 1 3))" "#f\n") ;TestCase 31
+
+    (cons "(define (variable? x) (symbol? x)) (variable? #t)" "#f\n") ;TestCase 32
+    (cons "((lambda (x y)
+      (cond ((= x y) #t)
+            ((> x y) 'x>y)
+            ((and (> (+ x y) 10) (> (* x y) 40)) 'string)
+            )
+      ) 111 11)" "x>y\n") ;TestCase 33
+
+    (cons "((lambda (a) (if (string? a) (string->symbol a))) \"a23\")" "a23\n") ;TestCase 34
+    (cons " (define (=number? exp num) (and (number? exp) (= exp num))) (=number? 5 1)" "#f\n") ;TestCase 35
+    (cons "(define (a x set) (cond
+    ((null? set) (list x))
+    ((= x (car set)) set)
+    ((< x (car set)) (cons x set))
+    (else (cons (car set)(a x (cdr set))))))
+	(a 3 (cons 5 4))" "(3 . (5 . 4))\n") ;TestCase 37
+    (cons "(define (expmod a b m) 
+  (cond ((= b 0) 1)
+	((= (remainder b 2) 0) (remainder (expmod (remainder (* a a) m) (/ b 2) m) m))
+	(else (remainder (* a (expmod a (- b 1) m)) m))))
+   (expmod 5 13 1)" "0\n") ;TestCase 38
+
+    (cons "(define (a str)
+    (define (b x sum)
+      (cond
+        ((= (string-length str) x) sum)
+        (else (b (+ x 1) (+ (char->integer (string-ref str x)) (* 256 sum))))))
+    (b 0 0)) (a \"hello\")" "448378203247\n") ;TestCase 39
+
+    (cons "(define (b set1 set2)
+  (cond
+    ((null? set1) set2)
+    ((null? set2) set1)
+    (else
+     (let ((s1 (car set1))
+           (s2 (car set2)))
+       (cond
+       ((= s1 s2) (cons s1 (b (cdr set1) (cdr set2))))
+       ((> s1 s2) (cons s2 (b set1 (cdr set2))))
+       ((< s1 s2) (cons s1 (b (cdr set1) set2))))))))
+(b '(1 2 3) '(4 5 6))" "(1 . (2 . (3 . (4 . (5 . (6 . ()))))))\n") ;TestCase 40
+
+    (cons "(let ((z 2)) (define x (lambda (x) (lambda (y z) (y x))))
+  (((x (lambda () z)) (lambda (z) z) 3)))" "2\n") ;TestCase 41
+
+    (cons "((lambda (z)
+     (define x (lambda (xv) (lambda (y z) (y xv))))
+
+     (((x (lambda () z)) (lambda (zv) zv) 3))
+     ) 14)" "14\n") ;TestCase 42
+
+    (cons "(define a 'hello) a" "hello\n") ;TestCase 43
+
+    (cons "(define b (string-length \"world\")) b" "5\n") ;TestCase 44
+
+    (cons "(define loop (lambda (num func param)
+                 (if (zero? num)
+                     param
+                     (loop (- num 1) func (func param))
+                     )
+                 )
+    )
+(loop 7 (lambda (x) (+ x x)) 43)" "5504\n") ;TestCase 45
+
+    (cons "(define loop2 (lambda (num func param)
+                  (if (zero? num)
+                      param
+                      (func (loop2 (- num 1) func param)
+                        )
+                      )
+                  )
+    ) (loop2 7 (lambda (x) (+ x x)) 3)" "384\n") ;TestCase 46
+
+    (cons "(define loop3 (lambda (num func param)
+                  (begin
+                    (define i 0)
+                    (define subloop (lambda ()
+                                      (if (= i num)
+                                          param
+                                          (begin
+                                            (set! i (+ i 1))
+                                            (func param)
+                                            (subloop)
+                                            )
+                                          )
+                                      )
+                      )
+                    )
+                  (subloop)
+                  )
+    ) (loop3 7 (lambda (x) (+ 8 x)) 123)" "123\n") ;TestCase 47
+
+    (cons "(define loop4 (lambda (num func param)
+                  (begin
+                    (define i 0)
+                    (define subloop (lambda ()
+                                      (if (= i num)
+                                          param
+                                          (begin
+                                            (set! i (+ i 1))
+                                            (set! param (func param))
+                                            (subloop)
+                                            )
+                                          )
+                                      )
+                      )
+                    )
+                  (subloop)
+                  )
+    ) (loop4 7 (lambda (x) (+ 4 x)) 1213)" "1241\n") ;TestCase 48
+
+    (cons "(define loop5 (lambda (num func param)
+                  (begin
+                    (define i 0)
+                    (define subloop (lambda ()
+                                      (cond ((= i num) param)
+                                        (else
+                                          (begin
+                                            (set! i (+ i 1))
+                                            (set! param (func param))
+                                            (subloop)
+                                            )
+                                          )
+                                          )
+                                      )
+                      )
+                    )
+                  (subloop)
+                  )
+    ) (loop5 21 (lambda (x) (* 3 x)) 123)" "1286623443969\n") ;TestCase 49
+
+    (cons "(define c (list 1 (list 2 (list 3 (list 4 (list 5 (list 6 7))))))) c" "(1 . ((2 . ((3 . ((4 . ((5 . ((6 . (7 . ())) . ())) . ())) . ())) . ())) . ()))\n") ;TestCase 50
+
+    (cons "(define (c set1 set2)
+  (define s1 (car set1))
+  (define s2 (car set2))
+  (cond
+    ((or (null? set1) (null? set2)) (append set1 set2))
+    (else
+       (cond
+       ((= s1 s2) (cons s1 (cons (cdr set1) (cdr set2))))
+       ((> s1 s2) (cons s2 (cons set1 (cdr set2))))
+       ((< s1 s2) (cons s1 (cons (cdr set1) set2)))))))	   (c '(1 2 3) '(4 6))" "(1 . ((2 . (3 . ())) . (4 . (6 . ()))))\n") ;TestCase 51
+
+    (cons "(define (accumulate op init lst)
+    (if (null? lst)
+        init
+        (op (car lst) (accumulate op init (cdr lst)))))
+(accumulate * 2 '(1 2 3 4 5 6 7 8 9))" "725760\n") ;TestCase 52
+
+    (cons "(define f1 (lambda (x) x)) (f1 2)" "2\n") ;TestCase 53
+
+    (cons "(define f2 (lambda (o a b) (o a b))) (f2 + 5 6)" "11\n") ;TestCase 54
+
+    (cons "(define f3 (lambda () (begin
+                         (define foo (lambda (x) (x 5 6)))
+                         (define bar (lambda (a b) (+ a b)))
+                         (foo bar)
+                         )
+               )
+    ) (f3)" "11\n") ;TestCase 55
+
+    (cons "(define f4 (lambda (z) (begin
+                         (define foo (lambda (x y) (x y 5 6)))
+                         (define bar (lambda (op a b) (op a b)))
+                         (foo bar z)
+                         )
+               )
+    ) (f4 *)" "30\n") ;TestCase 56
+
+    (cons "(define f5 (lambda () (begin
+                           (define foo (lambda (x y) (x y 5 6)))
+                           (define bar (lambda (op a b) (op a b)))
+                           (define oop +)
+                           (foo bar oop)
+                           )
+                 )
+      ) (f5)" "11\n") ;TestCase 57
+
+    (cons "(let ((square (lambda (x) (* x x)))) 33)" "33\n") ;TestCase 59
+
+    (cons "(define fun1 (lambda ()
+                 (begin
+                   (+ 2 1)
+                   (+ 3 4)
+                   )
+                 )
+    ) (fun1)" "7\n") ;TestCase 60
+
+    (cons " (define fun2 (lambda (x)
+                 (begin
+                   (set! x (+ 2 1))
+                   (set! x (+ x 3 4))
+                   x
+                   )
+                 )
+    ) (fun2 45)" "10\n") ;TestCase 61
+
+    (cons "(define fun3 (lambda ()
+                 (begin
+                   (define x (+ 2 1))
+                   (set! x (+ x 3 4))
+                   x
+                   )
+                 )
+    ) (fun3)" "10\n") ;TestCase 62
+
+    (cons "(define fun4 (lambda ()
+                 (begin
+                   (define f (lambda () (+ 2 1)))
+                   (define x (+ (f) 3 4))
+                   x
+                   )
+                 )
+    ) (fun4)" "10\n") ;TestCase 63
+
+    (cons "(define fun5 (lambda ()
+                 (begin
+                   (define f (lambda () (+ 2 1)))
+                   (define g (lambda () (+ (f) 3 4)))
+                   g
+                   )
+                 )
+    ) ((fun5))" "10\n") ;TestCase 64
+
+    (cons "(define fun6 (lambda ()
+                 (begin
+                   (define f (lambda () (+ 2 1)))
+                   (define g (lambda () (+ (f) 3 4)))
+                   (g)
+                   )
+                 )
+    )
+(fun6)" "10\n") ;TestCase 65
+
+    (cons "(define fun7 (lambda ()
+                 (begin
+                   (define f (lambda (a b) (+ 2 1)))
+                   (define g (lambda () (f 3 4)))
+                   (g)
+                   )
+                 )
+    ) (fun7)" "3\n") ;TestCase 66
+
+    (cons "(define fun8 (lambda ()
+                 (begin
+                   (define f (lambda (a b) (+ a b)))
+                   (define g (lambda (f) (f 3 4)))
+                   (+ (g f) (g *) (g -) (g +))
+                   )
+                 )
+    ) (fun8)" "25\n") ;TestCase 67
+
+    (cons "(define fun9 (lambda ()
+                 (begin
+                   (define f (lambda (a b) (+ a b)))
+                   (define g (lambda (f) (f 3 4)))
+                   (define t (lambda (a) (
+                                         if (eq? a *)
+                                             *
+                                             a)))
+                   (+ (g f) (g (t *)) (g -) (g (t -)))
+                   )
+                 )
+    ) (fun9)" "17\n") ;TestCase 68
+
+    (cons "(define fool (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda () (+ a x y)))
+                            (set! a (+ (f) (f) (f)))
+                            a)
+                 )
+    ) (fool 2 3)" "15\n") ;TestCase 70
+
+    (cons "(define foo2 (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda () (+ a x y)))
+                            (set! a (f))
+                            (set! a (f))
+                            (set! a (f))
+                            a)
+                 )
+    ) (foo2 50 60)" "330\n") ;TestCase 71
+
+    (cons "(define foo3 (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda (b) (+ b x y)))
+                            (set! a (f a))
+                            (set! a (f a))
+                            (set! a (f a))
+                            a)
+                 )
+    ) (foo3 43 3)" "138\n") ;TestCase 72
+
+    (cons "(define foo4 (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda (b) (+ b x y)))
+                            (define g (lambda () (set! x 5)))
+                            a)
+                 )
+    ) (foo4 31 3)" "0\n") ;TestCase 73
+
+    (cons "(define foo5 (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda (b) (+ b x y)))
+                            (define g (lambda () (set! x 5)))
+                            (g)
+                            (f x))
+                 )
+    ) (foo5 11 4)" "14\n") ;TestCase74
+
+    (cons "(define foo6 (lambda (x y) (
+                            begin
+                            (define a 0)
+                            (define f (lambda (b) (+ b a x y)))
+                            (define g (lambda () (set! x 5)))
+                            (define t (lambda () (set! a y)))
+                            (g)
+                            (t)
+                            (f x))
+                 )
+    ) (foo6 101 3)" "16\n") ;TestCase 75
+
+    (cons "(define foo7 (lambda (x y) (
+                            begin
+                            (set! y x)
+                            (set! x y)
+                            (+ y x))
+                 )
+    ) (foo7 1 3)" "2\n") ;TestCase 76
+
+    (cons "(define foo8 (lambda (x y) (
+                            begin
+                            (define y x)
+                            (+ y x))
+                 )
+    ) (foo8 2 3)" "4\n") ;TestCase 77
+
+    (cons "(define foo9 (lambda (x y) (
+                            begin
+                            (define y x)
+                            (eq? y x))
+                 )
+    ) (foo9 12 8)" "#t\n") ;TestCase 78
+
+    (cons "(define foo10 (lambda (x y) (
+                            begin
+                            (set! y x)
+                            (eq? y x))
+                 )
+    ) (foo10 12 12)" "#t\n") ;TestCase 79
+
+    (cons "(define bar1 (lambda (a b)
+                (begin
+                  (define rec1 (lambda (b) (* b b)))
+                  (define num b)
+                  (cond ((eq? num 0) a)
+                    (else
+                      (bar1 (rec1 a) (- b 1)))
+                    )
+                  )
+                )
+    ) (bar1 4 3)" "65536\n") ;TestCase 80
+
+    (cons "(define bar2 (lambda (a b)
+                (begin
+                  (define rec1 (lambda (b) (* b b)))
+                  (set! b (- b 1))
+                  (cond ((eq? b 0) a)
+                    (else
+                      (bar2 (rec1 a) b))
+                    )
+                  )
+                )
+    ) (bar2 4 5)" "4294967296\n") ;TestCase 81
+
+    (cons "(define bar3 (lambda (a b)
+                (begin
+                  (define rec1 (lambda (b) (* b b)))
+                  (define rec2 (lambda (b) (- b 1)))
+                  (set! b (rec2 b))
+                  (cond ((eq? b 0) a)
+                    (else
+                      (bar3 (rec1 a) b))
+                    )
+                  )
+                )
+    ) (bar3 6 2)" "36\n") ;TestCase 82
+
+    (cons "(define bar4 (lambda (a b)
+                (begin
+                  (define rec1 (lambda (b) (* b b)))
+                  (define rec2 (lambda (b) (- b 1)))
+                  (set! b (rec2 b))
+                  (cond ((eq? b 0) a)
+                    (else
+                      (rec1 (bar4 a b)))
+                    )
+                  )
+                )
+    ) (bar4 5 2)" "25\n") ;TestCase 83
+
+    (cons "(define bar5 (lambda (a b)
+                  (begin
+                    (define rec1 (lambda (b) (* b b)))
+                    (define rec2 (lambda (b) (- b 1)))
+                    (set! b (rec2 b))
+                    (if (eq? b 0) a
+                        (rec1 (bar5 a b)))
+
+                    )
+                  )
+    ) (bar5 5 3)" "625\n") ;TestCase 84
+
+    (cons "(define bar6 (lambda (a b c)
+                  (begin
+                    (define r c)
+                    (define rac1 (lambda (b) (* b b)))
+                    (define rac2 (lambda (b) (/ 1000 b)))
+                    (define rac (if (> r 5) rac1 rac2))
+                    (rac b)
+                    )
+                  )
+    ) (bar6 1 2 3)" "500\n") ;TestCase 85
+
+    (cons "(define bar7 (lambda (a b c)
+                  (begin
+                    (define r c)
+                    (define rac1 (lambda (b) (* b b)))
+                    (define rac2 (lambda (b) (/ 1000 b)))
+                    (define rac (if (> r 5) rac1 rac2))
+                    (define num b)
+                    (if (= 0 num)
+                        a
+                        (bar7 (rac a) (- b 1) c))
+                    )
+                  )
+    ) (bar7 5 2 6)" "625\n") ;TestCase 86
+
+    (cons "(define bar8 (lambda (a b c d)
+                  (begin
+                    (define r c)
+                    (define rac1 (lambda (b) (* b d)))
+                    (define rac2 (lambda (b) (/ 1000 b)))
+                    (define rac (if (> r 5) rac1 rac2))
+                    (define num b)
+                    (if (= 0 num)
+                        a
+                        (bar8 (rac a) (- b 1) c d))
+                    )
+                  )
+    ) (bar8 1 5 2 6)" "1000\n") ;TestCase 87
+
+    (cons "(define bar9 (lambda (a b c d e)
+                  (begin
+                    (define r c)
+                    (define rac1 (lambda (b) (* b d)))
+                    (define rac2 (lambda (b) (/ 1000 b)))
+                    (define rac (if (> r e) rac1 rac2))
+                    (define num b)
+                    (if (= 0 num)
+                        a
+                        (bar9 (rac a) (- b 1) c d e))
+                    )
+                  )
+    ) (bar9 2 7 3 3 10)" "500\n") ;TestCase 88
+
+    (cons "(define bar10 (lambda (a b c d e)
+                  (begin
+                    (define r c)
+                    (define rac1 (lambda (b) (* b d)))
+                    (define rac2 (lambda (b) (/ 1000 b)))
+                    (define rac (if (> r e) rac1 rac2))
+                    (define num b)
+                    (if (= 0 num)
+                        a
+                        (bar10 (rac (rac1 (rac2 a))) (- b 1) c d e))
+                    )
+                  )
+    ) (bar10 1 5 4 6 1)" "36000\n") ;TestCase 89
+
+    (cons "(((lambda (x)  
+    (lambda (z)
+      (* x x))) 4) 5)" "16\n") ;TestCase 90
+
+    (cons "((lambda () (+)))" "0\n") ;TestCase 91
+
+    (cons "((((lambda () (lambda (aa) (lambda (bb) (+ aa bb))))) 55) 66)" "121\n") ;TestCase 92
+
+    (cons "((((lambda () (lambda (aa) (lambda (bb) (- aa bb))))) 55) 66)" "-11\n") ;TestCase 93
+
+    (cons "((((lambda () (lambda (aa) (lambda (bb) (+ aa bb))))) 30) 4)" "34\n") ;TestCase 94
+
+    (cons "((lambda (a b c d) (a (b (c d)))) + - * 4)" "-4\n") ;TestCase 95
+
+    (cons "(define tar1 (lambda (a)
+                (begin
+                  (define r a)
+                  (if (= r 1) 1 (+ 1 (tar1 (- r 1))))))) (tar1 50)" "50\n") ;TestCase 96
+
+    (cons "(define tar2 (lambda (a)
+                (begin
+                  (define r a)
+                  (cond ((= r 1) 1)
+                   (else (* 2 (tar2 (- r 1)))))))) (tar2 5)" "16\n") ;TestCase 97
+
+    (cons "(define bin2dec (lambda (x y)
+                    (begin
+                      (define rem (remainder x 10))
+                      (set! y (+ (* y 2) (* y rem)))
+                      (if (= x 0)
+                          y
+                          (bin2dec (remainder x 10) y)
+                          )
+                      )
+                    )
+    ) (bin2dec 1000 2)" "8\n") ;TestCase 98
+
+    (cons "(define rem (lambda (x)(remainder x 10))) (rem 443)" "3\n") ;TestCase 99
+
+    (cons "(define f (lambda (b) (/ 200 b))) (f 4)" "50\n") ;TestCase 100
+
+    (cons "((lambda (a b) (cons a b)) 5 4)" "(5 . 4)\n") ;TestCase 101
+    (cons "(boolean? (procedure? (lambda () (make-string 5))))" "#t\n") ;TestCase 103
+
+    (cons "((lambda (a) (boolean? a)) #t)" "#t\n") ;TestCase 104
+    (cons "((lambda (a) (if (char? a) (char->integer a) (if (integer? a) (integer->char a) a))) #\\x50 )" "80\n") ;TestCase 105
+    (cons "(pair? (cons 4 6))" "#t\n") ;TestCase 106
+    (cons "((lambda (a b) (cons a b)) 55 6)" "(55 . 6)\n") ;TestCase 107
+    (cons "(pair? (lambda (a b) (cons a b)))" "#f\n") ;TestCase 108
+    (cons "((lambda (a b) (pair? (cons a b))) 1234 5678)" "#t\n") ;TestCase 109
+    (cons "(procedure? (lambda (a b) (cons a b)))" "#t\n") ;TestCase 110
+    (cons "(zero? 5)" "#f\n") ;TestCase 111
+    (cons "(not (zero? 5))" "#t\n") ;TestCase 112
+    (cons "(define a (lambda (b) (rational? b))) (a 56)" "#t\n") ;TestCase 113
+    (cons "(define a (lambda (b) (not (rational? b)))) (a 56)" "#f\n") ;TestCase 114
+    (cons "(denominator (/ 10 2))" "1\n") ;TestCase 115
+    (cons "(numerator 100/50)" "2\n") ;TestCase 116
+    (cons "(define a (lambda (x y) (if (not (zero? x)) (denominator (/ y x)) (numerator y)))) (a 0 5)" "5\n"); TestCase 117
+    (cons "(define x (lambda (a b) (if (> (string-length a) b) (string-ref a b) a))) (char->integer (x \"hello\" 3))" "108\n") ;TestCase 1199
+    (cons "(define x (lambda (a b c) (if (> (string-length a) b) (string-set! a b c) a))) (string->symbol (x \"hello\" 30 #\r))" "hello\n") ;TestCase 120
+    (cons "(string->symbol ((lambda (b) (symbol->string b)) 'a))" "a\n") ;TestCase 121
+    (cons "(define f (lambda (p x) (begin
+                            (set-car! p x)
+                            p))) (f (cons 4 5) 444)" "(444 . 5)\n") ;TestCase 128
+ (cons "(define f (lambda (p x) (begin
+                            (set-cdr! p x)
+                           p))) (f (cons 4 5) 444)" "(4 . 444)\n") ;TestCase 129
+  ;  (cons "(apply (lambda (a) (* a a)) '(2))" "4\n") ;TestCase 130
+    (cons "(let ((str 'hello)) (set! f1 (lambda () str)) (set! f2 (lambda () (string->symbol str))) str)" "hello\n") ;TestCase 131
+    (cons "(let ((x 2) (y 3)) (let* ((x 7)
+         (z (+ x y))) (* z x)))" "70\n") ;TestCase 132
+    (cons "(let* ((x 2) (y 3))
+    (let ((x 7)
+           (z (+ x y)))
+      (* z x)))" "35\n") ;TestCase 133
+    (cons "(letrec ((x 2) (y 3))
+    (let ((x 7)
+           (z (+ x y)))
+      (* z x)))" "35\n") ;TestCase 134
+  ;  (cons "((lambda (ls1 ls2) (append ls1 ls2)) '(1 2 3) '(q w e))" "(1 . (2 . (3 . (q . (w . (e . ()))))))\n") ;TestCase 135
+ ;   (cons "(define bla (lambda (x y) (append (list x 2) (list 2 y))))
+;(bla '(1 2 3) '(q w e))" "((1 2 3) 2 2 (q w e))\n") ;TestCase 136 ;;;UNCLEAR!!!
+  ;  (cons "(apply + (list 1 3 2))" "6\n"); TestCase 137
+  ;  (cons "((lambda (list) (apply (lambda (x . y) (+ x 3)) list)) (list 1 3 2))" "4\n") ;TestCase 138 
+    (cons "(map number? '(1 2 3))" "(#t . (#t . (#t . ())))\n") ;TestCase 139 ;
+    (cons "(map boolean? '(#t #t #f \"bla\"))" "(#t . (#t . (#t . (#f . ()))))\n") ;TestCase 140 
+    (cons "(map (lambda (x) (if (integer? x) (char->integer (integer->char x)) 0)) '(1 2 3 + #f))" "(1 . (2 . (3 . (0 . (0 . ())))))\n") ;TestCase 141 ;UNCLEAR
+    (cons "(map (lambda (x) (if (string? x) (string->symbol x) 0)) '(\"a1\" \"b2\" 3 + \"cf\"))" "(a1 . (b2 . (0 . (0 . (cf . ())))))\n") ;TestCase 142 ;UNCLEAR
+    (cons "((lambda (int) (integer? int))4)" "#t\n") ;TestCase 143
+  ;  (cons "(map number? '(1 2 '3))" "(#t . (#t . (#f . ())))\n") ;TestCase 144 ;UNCLEAR
+    (cons "(string? '1)" "#f\n") ;TestCase 145
+    (cons "((lambda (ch) (if (char? ch) (char->integer ch))) #\\x666)" "1638\n") ;TestCase 147
+    (cons "((lambda (int) (if (boolean? (char? (integer->char int))) 'ok)) 5)" "ok\n") ;TestCase 148
+    
+    (cons "((lambda (str)
+   (if (string? str)
+    (begin
+	 (string-set! str 1 (integer->char 66))
+	 str))) \"ssss\")" "\"sBss\"\n") ;TestCase 149
+
+    
+    (cons "((lambda (sym int)
+   (if (symbol? sym) (begin
+		       (set! a (symbol->string sym))
+		       (string-set! a 2 (integer->char int))
+		       a))) 'abc 33)" "\"ab!\"\n") ;TestCase 150
+    (cons "((lambda (list) (begin
+		(set-car! (car (cdr list)) (cons 1 2))
+		 list)) (list 1 (cons 22 66) 3 4))" "(1 . (((1 . 2) . 66) . (3 . (4 . ()))))\n") ;TestCase 151
+
+ 
+   ; (cons "`(+ 1 ,(car '(1 2)) ,@'(2 3))" "(+ . (1 . (1 . (2 . (3 . ())))))\n") ;TestCase 195
+   ; (cons "`((unquote-splicing (quote (3 4 5))))" "(3 . (4 . (5 . ())))\n") ;TestCase 196
+  ;  (cons "`(+ ,'(+ 1 2 3) ,'(+ 2 3) (+ ,@'( 6 7)))" "(+ . ((+ . (1 . (2 . (3 . ())))) . ((+ . (2 . (3 . ()))) . ((+ . (6 . (7 . ()))) . ()))))\n") ;TestCase 197
+    ;(cons "`(+ ,(+ 1 2 3) ,(+ 2 3) (+ ,@'( 6 7)))" "(+ . (6 . (5 . ((+ . (6 . (7 . ()))) . ()))))\n") ;TestCase 198
+   ; (cons "(quasiquote (+ ,(+ 1 2 3) ,(+ 2 3) (+ (unquote-splicing '( 6 7)))))" "(+ . (6 . (5 . ((+ . (6 . (7 . ()))) . ()))))\n") ;TestCase 199
+  ;  (cons "`(+ ,(cons 2 3) ,@'((cons 2 3)) ,'( 2 3))" "(+ . ((2 . 3) . ((cons . (2 . (3 . ()))) . ((2 . (3 . ())) . ()))))\n") ;TestCase 200
+    
+))
+
+;;; Tests list for debugging purposes
+(define tests
+  (list   
+))    
+
+
+(display (format "\033[1mComp171 - Compiler Tests\033[0m\n================================\n"))
+
+(runAllTests
+  (list      
+
+      (cons "RealTests" real-tests)
+    
+      ;(cons "Internal Helper Procedures" internal-helper-procedures-tests)
+      ;(cons "Debugging" tests)  
+      
+))

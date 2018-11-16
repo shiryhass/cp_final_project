@@ -1,0 +1,20 @@
+ MAKE_SOB_FRAC:
+  PUSH(FP);
+  MOV(FP, SP);
+  PUSH(IMM(3));
+  PUSH(FPARG(1));
+  CALL(ABS);
+  DROP(1);
+  MOV(R1,R0);  // R1 <- |FPARG(1)|
+  CALL(MALLOC);
+  DROP(1);  
+  CMP(FPARG(1),0);
+  JUMP_GE(MAKE_SOB_FRAC_CONT);
+  MUL(FPARG(0),IMM(-1));
+  MAKE_SOB_FRAC_CONT:
+  MOV(IND(R0), T_FRAC);
+  MOV(INDD(R0, 1), FPARG(0));
+  MOV(INDD(R0, 2), R1);
+  POP(FP);
+  RETURN;
+ 
